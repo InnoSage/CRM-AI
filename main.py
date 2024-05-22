@@ -14,6 +14,7 @@ import json
 from model.QueryRequest import QueryRequest
 from model.ResponseModel import SuccessResponseModel, ErrorResponseModel
 
+import requests
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -367,7 +368,39 @@ def query_data(request: QueryRequest):
         # Get the Groq API key and create a Groq client
         organization_id = request.organization_id
         sheet_id = request.sheet_id
-        model = "llama3-70b-8192"
+
+        # 모델 선택
+        api_key = config.GROQ_API_KEY
+        url = "https://api.groq.com/openai/v1/models"
+
+        # API 요청을 위한 헤더를 설정합니다.
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # API 요청을 보내고 응답을 받습니다.
+        response = requests.get(url, headers=headers)
+        models = response.json()
+
+        # 모델 리스트
+        origin_model = [
+            "llama3-70b-8192",
+            "mixtral-8x7b-32768",
+            "llama3-8b-8192",
+            "gemma-7b-it",
+        ]
+
+        # 활성화된 모델만 포함하는 리스트를 생성합니다.
+        active_models = [
+            model
+            for model in origin_model
+            if any(m["id"] == model and m["active"] for m in models["data"])
+        ]
+
+        model = active_models[0]
+
+        print("Selected model:", model)
         max_num_reflections = 5
 
         client = Groq(api_key=config.GROQ_API_KEY)
