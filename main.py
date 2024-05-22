@@ -11,6 +11,8 @@ from groq import Groq
 import duckdb
 import sqlparse
 import json
+from model.QueryRequest import QueryRequest
+from model.ResponseModel import SuccessResponseModel, ErrorResponseModel
 
 from pydantic import BaseModel
 
@@ -83,7 +85,9 @@ def get_db_connection():
         return None
 
 
-def generate_prompt_and_update_files(update_csv_path, save_csv_path, organization_id, sheet_id):
+def generate_prompt_and_update_files(
+    update_csv_path, save_csv_path, organization_id, sheet_id
+):
     client = OpenAI(api_key=config.GPT_SERVER_KEY)
 
     if os.path.exists(save_csv_path):
@@ -106,19 +110,24 @@ def generate_prompt_and_update_files(update_csv_path, save_csv_path, organizatio
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.1
+                temperature=0.1,
             )
 
             output = response.choices[0].message.content.replace("[Attributes]\n", "")
-            new_prompt = NEW_PROMPT_TEMPLATE.format(file_name=FILE_NAME, atttributes=output, organization_id=organization_id, sheet_id=sheet_id)
+            new_prompt = NEW_PROMPT_TEMPLATE.format(
+                file_name=FILE_NAME,
+                atttributes=output,
+                organization_id=organization_id,
+                sheet_id=sheet_id,
+            )
 
-            prompt_path = './prompts/{}_prompt.txt'.format(FILE_NAME)
-            with open(prompt_path, 'r', encoding='utf-8') as file:
+            prompt_path = "./prompts/{}_prompt.txt".format(FILE_NAME)
+            with open(prompt_path, "r", encoding="utf-8") as file:
                 old_prompt = file.readlines()
-                old_prompt = ''.join(old_prompt)
-            with open(prompt_path, 'w', encoding='utf-8') as file:
+                old_prompt = "".join(old_prompt)
+            with open(prompt_path, "w", encoding="utf-8") as file:
                 file.writelines(new_prompt)
 
         # CSV Updating
@@ -126,7 +135,7 @@ def generate_prompt_and_update_files(update_csv_path, save_csv_path, organizatio
 
     else:
         # CSV ADD Process
-        DEFAULT_DF = pd.read_csv('./data/default.csv')
+        DEFAULT_DF = pd.read_csv("./data/default.csv")
 
         NEW = pd.read_csv(update_csv_path)
         NEW_MD = NEW.to_markdown(index=False)
@@ -140,16 +149,21 @@ def generate_prompt_and_update_files(update_csv_path, save_csv_path, organizatio
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
-            temperature=0.1
+            temperature=0.1,
         )
 
         output = response.choices[0].message.content.replace("[Attributes]\n", "")
-        new_prompt = NEW_PROMPT_TEMPLATE.format(file_name=FILE_NAME, atttributes=output, organization_id=organization_id, sheet_id=sheet_id)
+        new_prompt = NEW_PROMPT_TEMPLATE.format(
+            file_name=FILE_NAME,
+            atttributes=output,
+            organization_id=organization_id,
+            sheet_id=sheet_id,
+        )
 
-        prompt_path = './prompts/{}_prompt.txt'.format(FILE_NAME.split(".")[0])
-        with open(prompt_path, 'w', encoding='utf-8') as file:
+        prompt_path = "./prompts/{}_prompt.txt".format(FILE_NAME.split(".")[0])
+        with open(prompt_path, "w", encoding="utf-8") as file:
             file.write(new_prompt)
 
         save_csv_path = update_csv_path.replace("data/tmp/", "data/")
@@ -168,26 +182,36 @@ def export_csv(organization_id: int, sheet_id: int):
         cursor = connection.cursor(dictionary=True)
 
         # Fetch attribute names for CSV header
-        cursor.execute("""
+        cursor.execute(
+            """
         SELECT a.id AS attribute_id, a.name AS attribute_name
         FROM attribute a
         JOIN sheet s ON a.sheet_id = s.id
         JOIN organization o ON s.organization_id = o.organization_id
         WHERE o.organization_id = %s
           AND s.id = %s;
-        """, (organization_id, sheet_id))
+        """,
+            (organization_id, sheet_id),
+        )
         attributes = cursor.fetchall()
 
         if not attributes:
-            raise HTTPException(status_code=404, detail="No attributes found for the given organization and sheet")
+            raise HTTPException(
+                status_code=404,
+                detail="No attributes found for the given organization and sheet",
+            )
 
-        attribute_ids = [attribute['attribute_id'] for attribute in attributes]
-        headers = ['company_name'] + [attribute['attribute_name'] for attribute in attributes]
+        attribute_ids = [attribute["attribute_id"] for attribute in attributes]
+        headers = ["company_name"] + [
+            attribute["attribute_name"] for attribute in attributes
+        ]
 
         # Create dynamic query part for attributes
-        attribute_cases = ', '.join(
-            [f"MAX(CASE WHEN attribute_id = {attr['attribute_id']} THEN value END) AS {attr['attribute_name']}" for attr
-             in attributes]
+        attribute_cases = ", ".join(
+            [
+                f"MAX(CASE WHEN attribute_id = {attr['attribute_id']} THEN value END) AS {attr['attribute_name']}"
+                for attr in attributes
+            ]
         )
 
         # Fetch content values for the attributes
@@ -204,19 +228,21 @@ def export_csv(organization_id: int, sheet_id: int):
 
         # Create DataFrame and save to CSV
         df = pd.DataFrame(content_values, columns=headers)
-        if not os.path.exists('data/tmp'):
-            os.makedirs('data/tmp')
+        if not os.path.exists("data/tmp"):
+            os.makedirs("data/tmp")
         update_csv_path = f"data/tmp/{organization_id}_{sheet_id}.csv"
         save_csv_path = f"data/{organization_id}_{sheet_id}.csv"
         df.to_csv(update_csv_path, index=False)
 
         # Generate prompt and update files
-        generate_prompt_and_update_files(update_csv_path, save_csv_path, organization_id, sheet_id)
+        generate_prompt_and_update_files(
+            update_csv_path, save_csv_path, organization_id, sheet_id
+        )
 
-        return {"detail": f"CSV file saved at {save_csv_path}"}
+        return SuccessResponseModel(data={"file_path": save_csv_path})
 
     except Error as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+        return ErrorResponseModel(code="DB_ERROR", message=f"Database error: {e}")
 
     finally:
         if connection.is_connected():
@@ -224,41 +250,39 @@ def export_csv(organization_id: int, sheet_id: int):
             connection.close()
 
 
-class QueryRequest(BaseModel):
-    user_question: str
-    organization_id: int
-    sheet_id: int
-
-
 def chat_with_groq(client, incontext, prompt, model):
     completion = client.chat.completions.create(
-        model=model, 
-        messages=[{"role": "system", "content": incontext},
-                  {"role": "user", "content": prompt}],
+        model=model,
+        messages=[
+            {"role": "system", "content": incontext},
+            {"role": "user", "content": prompt},
+        ],
         temperature=0.6,
         top_p=0.9,
     )
-    
+
     return completion.choices[0].message.content
 
 
 def execute_duckdb_query(query, organization_id, sheet_id):
     original_cwd = os.getcwd()
-    os.chdir('data')
+    os.chdir("data")
 
     file_name = f"{organization_id}_{sheet_id}.csv"
     print(f"Executing query: {query}")
-    print('file_name:', file_name)
+    print("file_name:", file_name)
 
     try:
-        conn = duckdb.connect(database=":memory:", read_only=False)   
+        conn = duckdb.connect(database=":memory:", read_only=False)
         table_name = f"table_{organization_id}_{sheet_id}"
         # 파일이 존재하는지 확인하고 테이블로 로드
         if os.path.exists(file_name):
-            conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM read_csv_auto('{file_name}')")
-            #print(f"Table {table_name} created and data loaded.")
+            conn.execute(
+                f"CREATE TABLE {table_name} AS SELECT * FROM read_csv_auto('{file_name}')"
+            )
+            # print(f"Table {table_name} created and data loaded.")
             # 필요한 작업 수행 (예시로 테이블 조회)
-            #query_result = conn.execute(f"SELECT * FROM {table_name}").fetchdf()
+            # query_result = conn.execute(f"SELECT * FROM {table_name}").fetchdf()
             query_result = conn.execute(query).fetchdf().reset_index(drop=True)
 
         else:
@@ -280,10 +304,7 @@ def execute_duckdb_query(query, organization_id, sheet_id):
 
 def get_json_output(llm_response):
     llm_response_no_escape = (
-        llm_response.replace("\\n", " ")
-        .replace("\n", " ")
-        .replace("\\", "")
-        .strip()
+        llm_response.replace("\\n", " ").replace("\n", " ").replace("\\", "").strip()
     )
     open_idx = llm_response_no_escape.find("{")
     close_idx = llm_response_no_escape.rindex("}") + 1
@@ -333,7 +354,9 @@ def get_summarization(client, incontext, user_question, df, model):
     {df}
 
     In a few sentences, summarize the data in the table as it pertains to the original user question. Avoid qualifiers like "based on the data" and do not comment on the structure or metadata of the table itself
-    """.format(user_question=user_question, df=df)
+    """.format(
+        user_question=user_question, df=df
+    )
 
     return chat_with_groq(client, incontext, prompt, model)
 
@@ -348,7 +371,7 @@ def query_data(request: QueryRequest):
         max_num_reflections = 5
 
         client = Groq(api_key=config.GROQ_API_KEY)
-        
+
         with open(f"prompts/base_prompt.txt", "r") as file:
             base_prompt = file.read()
 
@@ -378,26 +401,34 @@ def query_data(request: QueryRequest):
                     valid_response = True
             except:
                 # If there was an error processing the AI's response, get a reflection
-                llm_response = get_reflection(client, base_prompt, full_prompt, llm_response, model)
+                llm_response = get_reflection(
+                    client, base_prompt, full_prompt, llm_response, model
+                )
                 i += 1
 
         # Prepare the result to be returned
         if is_sql:
             # If the result is a SQL query, display the query and the resulting data
             summarization = get_summarization(
-                client, base_prompt, request.user_question, results_df.to_markdown(), model
+                client,
+                base_prompt,
+                request.user_question,
+                results_df.to_markdown(),
+                model,
             )
-            return {
-                "sql_query": result,
-                "data": results_df.to_dict(orient="records"),
-                "summarization": summarization
-            }
+            return SuccessResponseModel(
+                data={
+                    "sql_query": result,
+                    "data": results_df.to_dict(orient="records"),
+                    "summarization": summarization,
+                }
+            )
         else:
             # If the result is an error message, display it
-            return {"error": result}
+            ErrorResponseModel(code="QUERY_ERROR", message=result)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return ErrorResponseModel(code="SERVER_ERROR", message=str(e))
 
 
 if __name__ == "__main__":
