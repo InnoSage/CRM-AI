@@ -66,8 +66,7 @@ Reminder: Generate a DuckDB SQL to answer to the question:
 * [Best] If the question can be answered with the available tables: {{{{"sql": <sql here>}}}}
 * If the question cannot be answered with the available tables: {{{{"error": <explanation here>}}}}
 * Ensure that the entire output is returned on only one single line
-* Keep your query as simple and straightforward as possible; do not use subqueries
-* The user has provided this additional context: 'please write explanation it in korean'"""
+* Keep your query as simple and straightforward as possible; do not use subqueries"""
 
 
 def get_db_connection():
@@ -258,7 +257,7 @@ def chat_with_groq(client, incontext, prompt, model):
             {"role": "system", "content": incontext},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.6,
+        temperature=0.5,
         top_p=0.9,
     )
 
@@ -449,11 +448,15 @@ def query_data(request: QueryRequest):
                 results_df.to_markdown(),
                 model,
             )
+
+            trans_context = "Acts as a translator. Translate en sentences into ko sentences in written style."
+            kor_summarization = chat_with_groq(client, trans_context, summarization, "gemma-7b-it")
+            
             return SuccessResponseModel(
                 data={
                     "sql_query": result,
                     "data": results_df.to_dict(orient="records"),
-                    "summarization": summarization,
+                    "summarization": kor_summarization,
                 }
             )
         else:
