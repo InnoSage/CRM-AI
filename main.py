@@ -14,6 +14,7 @@ import json
 from model.QueryRequest import QueryRequest
 from model.ResponseModel import SuccessResponseModel, ErrorResponseModel
 
+import deepl
 import requests
 from pydantic import BaseModel
 
@@ -257,7 +258,7 @@ def chat_with_groq(client, incontext, prompt, model):
             {"role": "system", "content": incontext},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.5,
+        temperature=0.8,
         top_p=0.9,
     )
 
@@ -282,7 +283,8 @@ def execute_duckdb_query(query, organization_id, sheet_id):
             )
             # print(f"Table {table_name} created and data loaded.")
             # 필요한 작업 수행 (예시로 테이블 조회)
-            # query_result = conn.execute(f"SELECT * FROM {table_name}").fetchdf()
+            query_result = conn.execute(f"SELECT * FROM {table_name}").fetchdf()
+            print(query_result)
             query_result = conn.execute(query).fetchdf().reset_index(drop=True)
 
         else:
@@ -342,7 +344,7 @@ def get_reflection(client, incontext, full_prompt, llm_response, model):
     return chat_with_groq(client, incontext, reflection_prompt, model)
 
 
-def get_summarization(client, incontext, user_question, df, model):
+def get_summarization(client, user_question, df, model):
     prompt = f"""
     A user asked the following question pertaining to local database tables:
 
@@ -357,8 +359,8 @@ def get_summarization(client, incontext, user_question, df, model):
     """.format(
         user_question=user_question, df=df
     )
-
-    return chat_with_groq(client, incontext, prompt, model)
+    
+    return chat_with_groq(client, "", prompt, model)
 
 
 @app.post("/generate-query")
@@ -441,22 +443,22 @@ def query_data(request: QueryRequest):
         # Prepare the result to be returned
         if is_sql:
             # If the result is a SQL query, display the query and the resulting data
+
             summarization = get_summarization(
                 client,
-                base_prompt,
                 request.user_question,
                 results_df.to_markdown(),
                 model,
             )
 
-            trans_context = "Acts as a translator. Translate en sentences into ko sentences in written style."
-            kor_summarization = chat_with_groq(client, trans_context, summarization, "gemma-7b-it")
-            
+            translator = deepl.Translator(auth_key=config.DEEPL_API_KEY)
+            kor_summarization = translator.translate_text(summarization, target_lang="KO")
+
             return SuccessResponseModel(
                 data={
                     "sql_query": result,
                     "data": results_df.to_dict(orient="records"),
-                    "summarization": kor_summarization,
+                    "summarization": kor_summarization.text,
                 }
             )
         else:
